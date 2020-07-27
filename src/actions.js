@@ -3,7 +3,7 @@ import * as PointSet from "./point-set";
 import * as PointMap from "./point-map";
 import * as Matrix from "./matrix";
 import * as Types from "./types";
-import { isActive, setCell, updateData } from "./util";
+import { isActive, setCell, range, updateData } from "./util";
 
 type Action = <Cell: Types.CellBase>(
   state: Types.StoreState<Cell>,
@@ -272,6 +272,116 @@ export const go = <Cell: Types.CellBase>(
   };
 };
 
+/**
+ * Moves the spreadsheet's selection to the edge. This is used to implement
+ * ctrl+ArrowKey navigation.
+ *
+ * Directions are either -1, 0, or +1
+ *    -1: Means to move this dimension towards the smaller edge (top or left)
+ *     0: Means to maintain the current value for this dimension
+ *    +1: Means to move this dimension towards the larger edge (bottom or right)
+ *
+ * For instance, `goToEnd(-1, -1)` will move the selection to the top-left cell of the spreadsheet.
+ */
+export const goToEnd = <Cell: Types.CellBase>(
+  rowDirection: number,
+  columnDirection: number
+): KeyDownHandler<Cell> => (state, event) => {
+  if (!state.active) {
+    return null;
+  }
+
+  const { columns, rows } = Matrix.getSize(state.data);
+
+  // Calculates the number of cells needed in order to reach the edge
+  const getDistanceToTarget = (direction: number, currentIndex: number, maxIndex: number) => {
+    if (direction === 1) {
+      return maxIndex - currentIndex;
+    } else if (direction === -1) {
+      return -currentIndex;
+    } else {
+      return 0;
+    }
+  };
+
+  return go(
+    getDistanceToTarget(rowDirection, state.active.row, rows - 1),
+    getDistanceToTarget(columnDirection, state.active.column, columns - 1)
+  )(state, event);
+};
+
+// Handle ctrl+shift+{left, up}
+export const growSmaller = <Cell: Types.BaseCell>(
+  field: $Keys<Types.Point>
+): KeyDownHandler<Cell> => (state, event) => {
+  if (!state.active) {
+    return null;
+  }
+
+  const activeIndex = state.active[field];
+
+  // We want `maxSelectedIndex` -> `activeIndex`
+  const maxSelectedIndex = PointSet.max(state.selected)[field];
+  // We want `minSelectedIndex` -> `0`
+  const minSelectedIndex = PointSet.min(state.selected)[field];
+
+  let nextSelected = state.selected;
+
+  // Grow the selection towards the edge
+  range(minSelectedIndex).forEach(() => {
+    nextSelected = PointSet.extendEdge(nextSelected, field, -1);
+  });
+
+  // Shrink the selection towards the active cell
+  range(maxSelectedIndex - activeIndex).forEach(() => {
+    nextSelected = PointSet.shrinkEdge(nextSelected, field, 1);
+  });
+
+  return {
+    selected: PointSet.filter(
+      point => Matrix.has(point.row, point.column, state.data),
+      nextSelected
+    )
+  };
+};
+
+// Handle ctrl+shift+{right, down}
+export const growLarger = <Cell: Types.BaseCell>(
+  field: $Keys<Types.Point>
+): KeyDownHandler<Cell> => (state, event) => {
+  if (!state.active) {
+    return null;
+  }
+
+  const activeIndex = state.active[field];
+
+  const dimensions = Matrix.getSize(state.data);
+  const maxIndex = dimensions[field + "s"];
+
+  // We want `maxSelectedIndex` -> `maxIndex`
+  const maxSelectedIndex = PointSet.max(state.selected)[field];
+  // We want `minSelectedIndex` -> `activeIndex`
+  const minSelectedIndex = PointSet.min(state.selected)[field];
+
+  // Grow the selection towards the edge
+  let nextSelected = state.selected;
+  range(maxIndex - maxSelectedIndex).forEach(() => {
+    nextSelected = PointSet.extendEdge(nextSelected, field, 1);
+  });
+
+  // Shrink the selection towards the selected cell
+  range(activeIndex - minSelectedIndex).forEach(() => {
+    nextSelected = PointSet.shrinkEdge(nextSelected, field, -1);
+  });
+
+  return {
+    selected: PointSet.filter(
+      point => Matrix.has(point.row, point.column, state.data),
+      nextSelected
+    )
+  };
+};
+
 export const modifyEdge = (field: $Keys<Types.Point>, delta: number) => (
   state: Types.StoreState<*>,
   event: *
@@ -325,6 +435,20 @@ const editKeyDownHandlers: KeyDownHandlers<*> = {
   Enter: keyDownHandlers.ArrowDown
 };
 
+const controlKeyDownHandlers: KeyDownHandlers<*> = {
+  ArrowUp: goToEnd(-1, 0),
+  ArrowDown: goToEnd(+1, 0),
+  ArrowLeft: goToEnd(0, -1),
+  ArrowRight: goToEnd(0, +1)
+};
+
+const controlShiftKeyDownHandlers: KeyDownHandlers<*> = {
+  ArrowUp: growSmaller("row"),
+  ArrowDown: growLarger("row"),
+  ArrowLeft: growSmaller("column"),
+  ArrowRight: growLarger("column")
+};
+
 const shiftKeyDownHandlers: KeyDownHandlers<*> = {
   ArrowUp: modifyEdge("row", -1),
   ArrowDown: modifyEdge("row", 1),
@@ -373,8 +497,12 @@ export function getKeyDownHandler<Cell: Types.CellBase>(
     handlers = editKeyDownHandlers;
   } else if (event.shiftKey && event.metaKey) {
     handlers = shiftMetaKeyDownHandlers;
+  } else if (event.ctrlKey && event.shiftKey) {
+    handlers = controlShiftKeyDownHandlers;
   } else if (event.shiftKey) {
     handlers = shiftKeyDownHandlers;
+  } else if (event.ctrlKey) {
+    handlers = controlKeyDownHandlers;
   } else if (event.metaKey) {
     handlers = metaKeyDownHandlers;
   } else {

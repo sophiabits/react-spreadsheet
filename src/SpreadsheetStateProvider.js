@@ -8,9 +8,10 @@ import { Provider } from "unistore/react";
 import * as Types from "./types";
 import * as PointSet from "./point-set";
 import * as Actions from "./actions";
-import * as PointMap from "./point-map";
 import * as Matrix from "./matrix";
+import { initialState } from "./state";
 import Spreadsheet, { type Props as SpreadsheetProps } from "./Spreadsheet";
+
 export { createEmptyMatrix } from "./util";
 
 type Unsubscribe = () => void;
@@ -27,17 +28,6 @@ export type Props<CellType, Value> = {|
     coords: Types.Point
   ) => void
 |};
-
-const initialState: $Shape<Types.StoreState<any>> = {
-  selected: PointSet.from([]),
-  copied: PointMap.from([]),
-  active: null,
-  mode: "view",
-  rowDimensions: {},
-  columnDimensions: {},
-  lastChanged: null,
-  bindings: PointMap.from([])
-};
 
 export default class SpreadsheetStateProvider<
   CellType: Types.CellBase,
